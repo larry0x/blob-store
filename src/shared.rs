@@ -3,7 +3,7 @@ use std::{
     ffi::{OsStr, OsString},
     fs::File,
     hash::Hash,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Mutex, MutexGuard, PoisonError},
 };
 
@@ -26,6 +26,10 @@ struct State<O> {
     in_flight: HashMap<O, usize>,
     /// Names of the files in `tmp/` that an `Ingest` or a `Staged` owns.
     live_temps: HashSet<OsString>,
+    /// Shard directories whose entries, up to the root, this process has
+    /// synced. A directory that exists is not proof: an earlier sync of it
+    /// may have failed.
+    durable_dirs: HashSet<PathBuf>,
 }
 
 impl<O: Eq + Hash + Copy> Shared<O> {
@@ -36,6 +40,7 @@ impl<O: Eq + Hash + Copy> Shared<O> {
             state: Mutex::new(State {
                 in_flight: HashMap::new(),
                 live_temps: HashSet::new(),
+                durable_dirs: HashSet::new(),
             }),
             _lock: lock,
         }
@@ -80,5 +85,13 @@ impl<O: Eq + Hash + Copy> Shared<O> {
 
     pub fn is_live_temp(&self, name: &OsStr) -> bool {
         self.state().live_temps.contains(name)
+    }
+
+    pub fn is_durable_dir(&self, dir: &Path) -> bool {
+        self.state().durable_dirs.contains(dir)
+    }
+
+    pub fn mark_durable_dir(&self, dir: PathBuf) {
+        self.state().durable_dirs.insert(dir);
     }
 }

@@ -65,7 +65,7 @@ impl<C: Catalog<F, H>, F: Format, H: Hasher, const N: usize> BlobStore<C, F, H, 
         const { assert!(N <= H::LEN, "a hash has fewer bytes than directory levels") };
 
         let root = root.into();
-        fs::create_dir_all(root.join(TMP_DIR))?;
+        create_root(&root)?;
 
         let lock = File::options()
             .create(true)
@@ -140,11 +140,14 @@ impl<C: Catalog<F, H>, F: Format, H: Hasher, const N: usize> BlobStore<C, F, H, 
             staged.size_bytes(),
             path.clone(),
         );
-        create_dirs(&self.shared.root, dir)?;
+        if !self.shared.is_durable_dir(dir) {
+            create_shard(&self.shared.root, dir)?;
+            self.shared.mark_durable_dir(dir.to_owned());
+        }
         // Replacing an existing file is safe: it holds these same bytes,
         // because the name is the hash of the content.
         staged.temp.persist(&path)?;
-        File::open(dir)?.sync_all()?;
+        sync_dir(dir)?;
         Ok(landed)
     }
 
@@ -264,30 +267,104 @@ fn check_layout(root: &Path, expected: &str) -> Result<(), Error> {
             fs::write(&temp, expected)?;
             File::open(&temp)?.sync_all()?;
             fs::rename(&temp, &path)?;
-            File::open(root)?.sync_all()?;
+            sync_dir(root)?;
             Ok(())
         },
         Err(error) => Err(error.into()),
     }
 }
 
-/// Create `dir` and its missing parents under `root`, and fsync the parent
-/// of each new directory, so the new entries survive a crash.
-fn create_dirs(root: &Path, dir: &Path) -> io::Result<()> {
+/// Create the root, its `tmp/`, and any missing ancestors, and make them
+/// durable: a record must never commit for a file whose directory a crash
+/// could lose.
+fn create_root(root: &Path) -> io::Result<()> {
     let mut missing = Vec::new();
-    let mut current = dir;
-    while current != root && !current.try_exists()? {
+    let mut current = root;
+    while !current.try_exists()? {
         missing.push(current);
-        current = current.parent().expect("dir lies under root");
+        match parent_of(current) {
+            Some(parent) => current = parent,
+            None => break,
+        }
     }
-    if missing.is_empty() {
-        return Ok(());
-    }
-    fs::create_dir_all(dir)?;
+    fs::create_dir_all(root.join(TMP_DIR))?;
     for created in missing.iter().rev() {
-        File::open(created.parent().expect("dir lies under root"))?.sync_all()?;
+        if let Some(parent) = parent_of(created) {
+            sync_dir(parent)?;
+        }
+    }
+    // Always, not only when something was created: an earlier open may have
+    // created the root, then failed to sync it.
+    if let Some(parent) = parent_of(root) {
+        sync_dir(parent)?;
+    }
+    sync_dir(root)
+}
+
+/// Create a shard directory, and sync every directory from its parent up to
+/// the root, so its entries survive a crash.
+fn create_shard(root: &Path, dir: &Path) -> io::Result<()> {
+    fs::create_dir_all(dir)?;
+    let mut current = dir;
+    while current != root {
+        current = current.parent().expect("a shard lies under the root");
+        sync_dir(current)?;
     }
     Ok(())
+}
+
+/// The parent directory, with `.` for a bare relative name. `None` at the
+/// top of the file system.
+fn parent_of(path: &Path) -> Option<&Path> {
+    match path.parent()? {
+        parent if parent.as_os_str().is_empty() => Some(Path::new(".")),
+        parent => Some(parent),
+    }
+}
+
+/// Make a directory's entries durable.
+fn sync_dir(dir: &Path) -> io::Result<()> {
+    #[cfg(test)]
+    sync_hook::observe(dir)?;
+    File::open(dir)?.sync_all()
+}
+
+/// Lets a test watch directory syncs, and make some of them fail.
+#[cfg(test)]
+pub(crate) mod sync_hook {
+    use std::{
+        cell::{Cell, RefCell},
+        io,
+        path::{Path, PathBuf},
+    };
+
+    thread_local! {
+        static SYNCED: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
+        static FAILURES: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub fn observe(dir: &Path) -> io::Result<()> {
+        if FAILURES.get() > 0 {
+            FAILURES.set(FAILURES.get() - 1);
+            return Err(io::Error::other("injected sync failure"));
+        }
+        SYNCED.with_borrow_mut(|synced| synced.push(dir.to_owned()));
+        Ok(())
+    }
+
+    /// Make the next `count` syncs on this thread fail.
+    // Only the store tests use it, and they need some features.
+    #[allow(dead_code)]
+    pub fn fail_next(count: usize) {
+        FAILURES.set(count);
+    }
+
+    /// The directories synced on this thread since the last call.
+    // Only the store tests use it, and they need some features.
+    #[allow(dead_code)]
+    pub fn take() -> Vec<PathBuf> {
+        SYNCED.with_borrow_mut(std::mem::take)
+    }
 }
 
 #[cfg(all(test, feature = "format-presets", feature = "hasher-blake3"))]
@@ -365,6 +442,92 @@ mod tests {
             fs::read_to_string(store.root().join(LAYOUT_FILE)).unwrap(),
             "hasher = \"blake3\"\ndepth  = 2\n"
         );
+    }
+
+    #[test]
+    fn open_makes_a_new_root_and_its_new_ancestors_durable() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("a").join("b").join("blobs");
+        sync_hook::take();
+        let _store = Store::open(&root, Mem::default()).unwrap();
+        let synced = sync_hook::take();
+        for expected in [
+            dir.path().to_owned(),
+            dir.path().join("a"),
+            dir.path().join("a").join("b"),
+            root.clone(),
+        ] {
+            assert!(synced.contains(&expected), "{expected:?} not in {synced:?}");
+        }
+        assert!(root.join(TMP_DIR).is_dir());
+    }
+
+    #[test]
+    fn open_syncs_the_root_again_after_a_failed_open() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("blobs");
+        sync_hook::fail_next(1);
+        assert!(matches!(
+            Store::open(&root, Mem::default()),
+            Err(Error::Io(_))
+        ));
+        assert!(root.is_dir(), "the root was created before the sync failed");
+
+        sync_hook::take();
+        let _store = Store::open(&root, Mem::default()).unwrap();
+        let synced = sync_hook::take();
+        assert!(synced.contains(&dir.path().to_owned()), "{synced:?}");
+        assert!(synced.contains(&root), "{synced:?}");
+    }
+
+    #[test]
+    fn a_new_shard_is_synced_up_to_the_root() {
+        let (_dir, store) = open();
+        sync_hook::take();
+        let landed = store.land(store.save(&png(19)).unwrap()).unwrap();
+        let shard = landed.path().parent().unwrap().to_owned();
+        let synced = sync_hook::take();
+        assert_eq!(
+            synced,
+            [
+                shard.parent().unwrap().to_owned(),
+                store.root().to_owned(),
+                shard
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failed_shard_sync_is_retried_by_the_next_land() {
+        let (_dir, store) = open();
+        let shard = store.path_of(&Blake3::digest(&png(20)), TestFormat::Png);
+        let shard = shard.parent().unwrap().to_owned();
+
+        // The shard is created, but syncing its parent fails.
+        sync_hook::fail_next(1);
+        assert!(matches!(
+            store.land(store.save(&png(20)).unwrap()),
+            Err(Error::Io(_))
+        ));
+        assert!(shard.is_dir());
+
+        // The shard exists now, but the next land syncs its parents again.
+        sync_hook::take();
+        let landed = store.land(store.save(&png(20)).unwrap()).unwrap();
+        let synced = sync_hook::take();
+        assert_eq!(
+            synced,
+            [
+                shard.parent().unwrap().to_owned(),
+                store.root().to_owned(),
+                shard.clone()
+            ]
+        );
+
+        // Once that succeeded, a land into the shard syncs only the shard.
+        drop(landed);
+        store.land(store.save(&png(20)).unwrap()).unwrap();
+        assert_eq!(sync_hook::take(), [shard]);
     }
 
     #[test]

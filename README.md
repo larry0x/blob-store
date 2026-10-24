@@ -181,8 +181,9 @@ The other types:
 3. The app checks for a duplicate with `Staged::hash`, if it wants to.
 4. `land`, under the file lock:
    1. It marks the hash in flight.
-   2. It renames the temp file into its shard directory.
-   3. It runs fsync on the directory.
+   2. The first time this process lands a file in a shard directory, it creates the directory, and runs fsync on every directory from its parent up to the root. A directory that exists is not proof: an earlier fsync of it may have failed. So the store keeps a set of the shard directories it has made durable, and adds one only after every fsync succeeded.
+   3. It renames the temp file into its shard directory.
+   4. It runs fsync on the shard directory.
 5. `write` opens a catalog transaction. The closure calls `BlobTx::insert` and writes the app's rows.
 6. After the commit, or after a rollback, the store clears the in-flight mark.
 
@@ -220,7 +221,7 @@ An app must not call `land` inside a `write` closure. That would take the file l
 | P2 | A failed save writes no record. | A failed `land` gives no `Landed`. A failed closure or commit rolls back the transaction. |
 | P3 | The blob record and the app's rows commit atomically. | Both are written in one catalog transaction. |
 | P4 | A file's name always matches its content. | Files enter the tree only by a rename of a temp file that was fully hashed and fsynced. |
-| P5 | A crash never breaks P1. | The file is durable before its record commits. A crash leaves at most an orphan file. |
+| P5 | A crash never breaks P1. | The file, and every directory above it up to the root, is durable before its record commits. `open` makes the root and any ancestors it creates durable. A crash leaves at most an orphan file. |
 | P6 | A file without a record is temporary. | Orphans come only from a crash, a rollback, a dropped `Landed`, or a failed deletion. `sweep` removes them. |
 | P7 | Saves, deletes, and sweeps of the same hash do not race. | All three touch files under the file lock. The in-flight mark covers the time between `land` and the commit. |
 | P8 | A store opened with the wrong settings fails at once. | `layout.toml` records the hasher and `N`, and `open` checks both. |
