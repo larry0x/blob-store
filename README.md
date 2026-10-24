@@ -206,12 +206,17 @@ The other types:
 
 The store has two locks:
 
-- The file lock covers every step that adds a file to the tree or takes one away: `begin`, `land`, the deletions after a commit, and `sweep`.
-- The state lock covers the set of hashes in flight and the set of live temp files. Nothing else is locked while it is held.
+- The file lock covers every step that adds a file to the shard tree or takes one away: `land`, the deletions after a commit, and the orphan checks of `sweep`.
+- The state lock covers the set of hashes in flight, the set of live temp files, and the set of durable shard directories. No other lock is taken while it is held. Creating a temp file in `begin`, and deleting a stray one in `sweep`, happen under this lock alone, so a sweep never sees a temp file before it is registered.
 
-The order is always: the file lock, then the catalog, then the state lock. Dropping a `Landed` or a `Staged` takes only the state lock. So an app can drop either one inside a `write` closure without a deadlock.
+The order is always: the file lock, then the catalog, then the state lock.
 
-An app must not call `land` inside a `write` closure. That would take the file lock while the catalog is held.
+The catalog is held while a `write` closure runs. So inside the closure, an app must not call these methods of the same store, or of the same catalog:
+
+- `write`, `get`, `list`, and `missing` take the catalog again. A catalog behind a plain mutex, such as `Sqlite`, then waits for itself forever. Read inside the transaction with `BlobTx::get` instead.
+- `land` and `sweep` take the file lock out of order. They can block forever against a sweep that holds the file lock and waits for the catalog.
+
+`begin`, `save`, and dropping an `Ingest`, a `Staged`, or a `Landed` take only the state lock, so they are safe inside the closure.
 
 ## Properties
 

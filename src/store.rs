@@ -102,9 +102,9 @@ impl<C: Catalog<F, H>, F: Format, H: Hasher, const N: usize> BlobStore<C, F, H, 
             .join(rel_path::<N>(hash, format.extension()))
     }
 
-    /// Start streaming a new file into `tmp/`.
+    /// Start streaming a new file into `tmp/`. Safe inside a
+    /// [`BlobStore::write`] closure.
     pub fn begin(&self) -> Result<Ingest<F, H>, Error> {
-        let _files = self.shared.lock_files();
         let temp = Temp::create(Arc::clone(&self.shared), &self.shared.root.join(TMP_DIR))?;
         Ok(Ingest::new(temp))
     }
@@ -156,6 +156,21 @@ impl<C: Catalog<F, H>, F: Format, H: Hasher, const N: usize> BlobStore<C, F, H, 
     /// After the commit, delete the files of the records that `f` removed.
     /// A file that fails to go is listed in [`Written::failed_removals`],
     /// and stays until the next sweep.
+    ///
+    /// The catalog is held while `f` runs. So inside `f`, do not call these
+    /// methods of the same store, or of the same catalog: they can block
+    /// forever.
+    ///
+    /// - [`BlobStore::write`], [`BlobStore::get`], [`BlobStore::list`], and
+    ///   [`BlobStore::missing`] take the catalog again. A catalog behind a
+    ///   plain mutex, like [`crate::sqlite::Sqlite`], waits for itself. Read
+    ///   inside the transaction with [`BlobTx::get`] instead.
+    /// - [`BlobStore::land`] and [`BlobStore::sweep`] take the file lock, out
+    ///   of order, and can block against a sweep that holds it and waits for
+    ///   the catalog.
+    ///
+    /// [`BlobStore::begin`], [`BlobStore::save`], and dropping an
+    /// [`Ingest`], a [`Staged`], or a [`Landed`] are safe inside `f`.
     pub fn write<T, E: From<Error>>(
         &self,
         f: impl FnOnce(&mut BlobTx<'_, '_, C, F, H>) -> Result<T, E>,
@@ -1012,6 +1027,50 @@ mod tests {
             Catalog::<TestFormat, Blake3>::get(&*catalog, &hash).unwrap(),
             Some(TestFormat::Png)
         );
+    }
+
+    /// `begin` and `save` are safe inside a write closure, even while a sweep
+    /// holds the file lock and waits for the catalog.
+    #[test]
+    fn saving_inside_a_write_does_not_block_against_a_sweep() {
+        let (_dir, store) = open();
+        // Files for the sweep to walk: each one takes the file lock, then
+        // reads the catalog.
+        for n in 0..40 {
+            add(&store, &pdf(n));
+        }
+        let (done, finished) = std::sync::mpsc::channel();
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        thread::scope(|scope| {
+            let store = &store;
+            let stop = &stop;
+            scope.spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    store.sweep().unwrap();
+                }
+            });
+            scope.spawn(move || {
+                for n in 0..200 {
+                    store
+                        .write(|_| {
+                            let staged = store.save(&png(n as u8))?;
+                            drop(staged);
+                            Ok::<_, Error>(())
+                        })
+                        .unwrap();
+                }
+                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                done.send(()).unwrap();
+            });
+            if finished
+                .recv_timeout(std::time::Duration::from_secs(30))
+                .is_err()
+            {
+                // The threads are stuck; a scope would wait for them forever.
+                eprintln!("deadlock: a save inside a write blocked against a sweep");
+                std::process::abort();
+            }
+        });
     }
 
     /// Saves, deletes, and sweeps of the same bytes race on several threads.

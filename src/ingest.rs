@@ -23,18 +23,8 @@ pub(crate) struct Temp<O: Eq + std::hash::Hash + Copy> {
 }
 
 impl<O: Eq + std::hash::Hash + Copy> Temp<O> {
-    /// Call with the file lock held, so that a sweep never sees the file
-    /// before it is registered.
     pub fn create(shared: Arc<Shared<O>>, dir: &Path) -> Result<Self, Error> {
-        let file = tempfile::Builder::new()
-            .prefix("ingest-")
-            .tempfile_in(dir)?;
-        let name = file
-            .path()
-            .file_name()
-            .expect("a temp file has a name")
-            .to_owned();
-        shared.register_temp(name.clone());
+        let (file, name) = shared.create_temp(dir)?;
         Ok(Self {
             file: Some(file),
             name,

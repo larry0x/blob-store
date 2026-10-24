@@ -32,13 +32,12 @@ impl<C: Catalog<F, H>, F: Format, H: Hasher, const N: usize> BlobStore<C, F, H, 
 
         for entry in fs::read_dir(self.root().join(TMP_DIR))? {
             let entry = entry?;
-            let _files = self.shared().lock_files();
-            if self.shared().is_live_temp(&entry.file_name()) {
-                continue;
-            }
-            match fs::remove_file(entry.path()) {
-                Ok(()) => report.removed_temp += 1,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {},
+            match self
+                .shared()
+                .remove_temp_unless_live(&entry.path(), &entry.file_name())
+            {
+                Ok(true) => report.removed_temp += 1,
+                Ok(false) => {},
                 Err(error) => report.failed.push((entry.path(), error)),
             }
         }
