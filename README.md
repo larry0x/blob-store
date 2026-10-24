@@ -95,6 +95,7 @@ blob_store::formats! {
 
 - Each variant must be named after a preset.
 - The macro derives `Clone`, `Copy`, `Debug`, `PartialEq`, `Eq`, and `Hash`. Other attributes on the enum and its variants pass through.
+- `#[cfg]` is not supported, on the enum or on a variant, also not through `#[cfg_attr]`. The generated code names every variant, so the macro stops the build with a clear message instead. To vary the formats by configuration, write one `formats!` per configuration.
 - Its `sniff` first asks `identify` which preset a file is. It then accepts the file only if that preset is a variant. So a file of another format is rejected, whatever the order of the variants.
 - The enum also gets `ALL`, every variant in the order written, and `media_type()`.
 
@@ -166,7 +167,7 @@ impl<C: Catalog<F, H>, F: Format, H: Hasher, const N: usize> BlobStore<C, F, H, 
 
 The other types:
 
-- `Ingest` streams bytes into `tmp/` and hashes them as they arrive. `finish` runs fsync and returns a `Staged`.
+- `Ingest` streams bytes into `tmp/` and hashes them as they arrive. `finish` runs fsync and returns a `Staged`. A failed `write` can leave part of a chunk in the file that the hash never saw. So after one, every later `write` and `finish` fails with `Error::IngestFailed`, and a retry needs a new `Ingest`.
 - `Staged` exposes the hash, the size in bytes, and the sniffed format. Dropping it deletes the temp file.
 - `Landed` is the proof that a file is in place. Only `land` creates one. Dropping it without recording it leaves an orphan file, which `sweep` removes.
 - `BlobTx` wraps the catalog transaction. `insert(landed, added_at)` records a blob. `remove(hash)` deletes a record now, and the file after the commit. `inner()` gives the app the raw transaction for its own rows.
@@ -181,8 +182,9 @@ The other types:
 3. The app checks for a duplicate with `Staged::hash`, if it wants to.
 4. `land`, under the file lock:
    1. It marks the hash in flight.
-   2. It renames the temp file into its shard directory.
-   3. It runs fsync on the directory.
+   2. The first time this process lands a file in a shard directory, it creates the directory, and runs fsync on every directory from its parent up to the root. A directory that exists is not proof: an earlier fsync of it may have failed. So the store keeps a set of the shard directories it has made durable, and adds one only after every fsync succeeded.
+   3. It renames the temp file into its shard directory.
+   4. It runs fsync on the shard directory.
 5. `write` opens a catalog transaction. The closure calls `BlobTx::insert` and writes the app's rows.
 6. After the commit, or after a rollback, the store clears the in-flight mark.
 
@@ -205,12 +207,17 @@ The other types:
 
 The store has two locks:
 
-- The file lock covers every step that adds a file to the tree or takes one away: `begin`, `land`, the deletions after a commit, and `sweep`.
-- The state lock covers the set of hashes in flight and the set of live temp files. Nothing else is locked while it is held.
+- The file lock covers every step that adds a file to the shard tree or takes one away: `land`, the deletions after a commit, and the orphan checks of `sweep`.
+- The state lock covers the set of hashes in flight, the set of live temp files, and the set of durable shard directories. No other lock is taken while it is held. Creating a temp file in `begin`, and deleting a stray one in `sweep`, happen under this lock alone, so a sweep never sees a temp file before it is registered.
 
-The order is always: the file lock, then the catalog, then the state lock. Dropping a `Landed` or a `Staged` takes only the state lock. So an app can drop either one inside a `write` closure without a deadlock.
+The order is always: the file lock, then the catalog, then the state lock.
 
-An app must not call `land` inside a `write` closure. That would take the file lock while the catalog is held.
+The catalog is held while a `write` closure runs. So inside the closure, an app must not call these methods of the same store, or of the same catalog:
+
+- `write`, `get`, `list`, and `missing` take the catalog again. A catalog behind a plain mutex, such as `Sqlite`, then waits for itself forever. Read inside the transaction with `BlobTx::get` instead.
+- `land` and `sweep` take the file lock out of order. They can block forever against a sweep that holds the file lock and waits for the catalog.
+
+`begin`, `save`, and dropping an `Ingest`, a `Staged`, or a `Landed` take only the state lock, so they are safe inside the closure.
 
 ## Properties
 
@@ -220,7 +227,7 @@ An app must not call `land` inside a `write` closure. That would take the file l
 | P2 | A failed save writes no record. | A failed `land` gives no `Landed`. A failed closure or commit rolls back the transaction. |
 | P3 | The blob record and the app's rows commit atomically. | Both are written in one catalog transaction. |
 | P4 | A file's name always matches its content. | Files enter the tree only by a rename of a temp file that was fully hashed and fsynced. |
-| P5 | A crash never breaks P1. | The file is durable before its record commits. A crash leaves at most an orphan file. |
+| P5 | A crash never breaks P1. | The file, and every directory above it up to the root, is durable before its record commits. `open` makes the root and its ancestors durable: until an open has succeeded and written `layout.toml`, every open runs fsync on each ancestor of the root, since a failed earlier open may have created some of them. A crash leaves at most an orphan file. |
 | P6 | A file without a record is temporary. | Orphans come only from a crash, a rollback, a dropped `Landed`, or a failed deletion. `sweep` removes them. |
 | P7 | Saves, deletes, and sweeps of the same hash do not race. | All three touch files under the file lock. The in-flight mark covers the time between `land` and the commit. |
 | P8 | A store opened with the wrong settings fails at once. | `layout.toml` records the hasher and `N`, and `open` checks both. |
