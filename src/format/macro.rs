@@ -13,6 +13,12 @@
 /// Attributes on the enum and on its variants pass through, so other derives
 /// and attributes such as `#[serde(rename = "…")]` work.
 ///
+/// The one exception is `#[cfg]`, on the enum or on a variant, also when a
+/// `#[cfg_attr]` would add one. The generated code names every variant, so a
+/// variant that `cfg` removed would break the build with a confusing error.
+/// The macro stops with a clear one instead. To vary the formats by
+/// configuration, write one `formats!` per configuration.
+///
 /// ```
 /// blob_store::formats! {
 ///     #[derive(PartialOrd, Ord)]
@@ -25,18 +31,56 @@
 /// assert_eq!(Media::Jpeg.media_type(), "image/jpeg");
 /// assert_eq!(Media::sniff(b"%PDF-1.7"), None);
 /// ```
+///
+/// A `cfg_attr` that adds other attributes is fine:
+///
+/// ```
+/// blob_store::formats! {
+///     #[cfg_attr(all(), derive(PartialOrd, Ord))]
+///     pub enum Media {
+///         /// Not a cfg(...) attribute, only text that mentions one.
+///         Jpeg,
+///         Png,
+///     }
+/// }
+/// assert!(Media::Jpeg < Media::Png);
+/// ```
+///
+/// Each of these stops the build, even though the condition is true:
+///
+/// ```compile_fail
+/// blob_store::formats! {
+///     pub enum Media { Jpeg, #[cfg(all())] Png }
+/// }
+/// ```
+///
+/// ```compile_fail
+/// blob_store::formats! {
+///     #[cfg(all())]
+///     pub enum Media { Jpeg, Png }
+/// }
+/// ```
+///
+/// ```compile_fail
+/// blob_store::formats! {
+///     pub enum Media { Jpeg, #[cfg_attr(all(), cfg(all()))] Png }
+/// }
+/// ```
 #[macro_export]
 macro_rules! formats {
     (
-        $(#[$meta:meta])*
+        $(#[$($attr:tt)*])*
         $vis:vis enum $name:ident {
-            $($(#[$variant_meta:meta])* $variant:ident),+ $(,)?
+            $($(#[$($variant_attr:tt)*])* $variant:ident),+ $(,)?
         }
     ) => {
-        $(#[$meta])*
+        $($crate::__formats_reject_cfg!($($attr)*);)*
+        $($($crate::__formats_reject_cfg!($($variant_attr)*);)*)+
+
+        $(#[$($attr)*])*
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
         $vis enum $name {
-            $($(#[$variant_meta])* $variant,)+
+            $($(#[$($variant_attr)*])* $variant,)+
         }
 
         // An app may use neither item.
@@ -73,6 +117,32 @@ macro_rules! formats {
                 ::core::option::Option::None
             }
         }
+    };
+}
+
+/// Stop the build if the tokens of an attribute hold `cfg(…)` at any depth:
+/// a bare `#[cfg(…)]`, or one that a `#[cfg_attr(…)]` would add.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __formats_reject_cfg {
+    () => {};
+    (cfg ($($_condition:tt)*) $($_rest:tt)*) => {
+        ::core::compile_error!(
+            "`formats!` does not support `#[cfg]`, also not through `#[cfg_attr]`; \
+             write one `formats!` per configuration instead"
+        );
+    };
+    (($($inner:tt)*) $($rest:tt)*) => {
+        $crate::__formats_reject_cfg!($($inner)* $($rest)*);
+    };
+    ([$($inner:tt)*] $($rest:tt)*) => {
+        $crate::__formats_reject_cfg!($($inner)* $($rest)*);
+    };
+    ({$($inner:tt)*} $($rest:tt)*) => {
+        $crate::__formats_reject_cfg!($($inner)* $($rest)*);
+    };
+    ($_first:tt $($rest:tt)*) => {
+        $crate::__formats_reject_cfg!($($rest)*);
     };
 }
 

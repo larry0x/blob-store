@@ -95,6 +95,7 @@ blob_store::formats! {
 
 - Each variant must be named after a preset.
 - The macro derives `Clone`, `Copy`, `Debug`, `PartialEq`, `Eq`, and `Hash`. Other attributes on the enum and its variants pass through.
+- `#[cfg]` is not supported, on the enum or on a variant, also not through `#[cfg_attr]`. The generated code names every variant, so the macro stops the build with a clear message instead. To vary the formats by configuration, write one `formats!` per configuration.
 - Its `sniff` first asks `identify` which preset a file is. It then accepts the file only if that preset is a variant. So a file of another format is rejected, whatever the order of the variants.
 - The enum also gets `ALL`, every variant in the order written, and `media_type()`.
 
