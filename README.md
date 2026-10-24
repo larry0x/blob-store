@@ -166,7 +166,7 @@ impl<C: Catalog<F, H>, F: Format, H: Hasher, const N: usize> BlobStore<C, F, H, 
 
 The other types:
 
-- `Ingest` streams bytes into `tmp/` and hashes them as they arrive. `finish` runs fsync and returns a `Staged`.
+- `Ingest` streams bytes into `tmp/` and hashes them as they arrive. `finish` runs fsync and returns a `Staged`. A failed `write` can leave part of a chunk in the file that the hash never saw. So after one, every later `write` and `finish` fails with `Error::IngestFailed`, and a retry needs a new `Ingest`.
 - `Staged` exposes the hash, the size in bytes, and the sniffed format. Dropping it deletes the temp file.
 - `Landed` is the proof that a file is in place. Only `land` creates one. Dropping it without recording it leaves an orphan file, which `sweep` removes.
 - `BlobTx` wraps the catalog transaction. `insert(landed, added_at)` records a blob. `remove(hash)` deletes a record now, and the file after the commit. `inner()` gives the app the raw transaction for its own rows.

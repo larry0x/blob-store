@@ -514,6 +514,29 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_write_fails_the_ingest_for_good() {
+        let (_dir, store) = open();
+        let hash = add(&store, &png(18));
+        let path = store.path_of(&hash, TestFormat::Png);
+
+        // The same bytes again, but the first write puts down only part of
+        // its chunk before it fails.
+        let payload = png(18);
+        let mut ingest = store.begin().unwrap();
+        ingest.fail_after = Some(5);
+        assert!(matches!(ingest.write(&payload), Err(Error::Io(_))));
+
+        // A retry would leave bytes in the file that the hash never saw.
+        assert!(matches!(ingest.write(&payload), Err(Error::IngestFailed)));
+        assert!(matches!(ingest.finish(), Err(Error::IngestFailed)));
+
+        // The recorded file is untouched, and the temp file is gone.
+        assert_eq!(fs::read(&path).unwrap(), png(18));
+        assert_eq!(tmp_entries(&store), 0);
+        assert_records_have_files(&store);
+    }
+
+    #[test]
     fn saving_the_same_bytes_twice_keeps_one_file_and_one_record() {
         let (_dir, store) = open();
         let hash = add(&store, &png(5));

@@ -4,6 +4,8 @@ use std::{error::Error as StdError, io, path::PathBuf};
 pub enum Error {
     #[error("file format not recognized")]
     UnknownFormat,
+    #[error("an earlier write to this ingest failed; start a new ingest")]
+    IngestFailed,
     #[error("the blob belongs to another store")]
     WrongStore,
     #[error("the store at {0} is open in another process")]

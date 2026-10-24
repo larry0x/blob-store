@@ -65,12 +65,19 @@ impl<O: Eq + std::hash::Hash + Copy> Drop for Temp<O> {
 
 /// A file being streamed into `tmp/`, hashed as it arrives.
 ///
-/// Dropping it deletes the temp file.
+/// Dropping it deletes the temp file. After a failed [`Ingest::write`], the
+/// file may hold part of a chunk that the hash never saw, so every later
+/// `write` and `finish` fails with [`Error::IngestFailed`]: start a new
+/// ingest to retry.
 pub struct Ingest<F, H: Hasher> {
     temp: Temp<H::Output>,
     hasher: H,
     size_bytes: u64,
     head: Vec<u8>,
+    failed: bool,
+    /// Make the next write put down this many bytes, then fail.
+    #[cfg(test)]
+    pub(crate) fail_after: Option<usize>,
     _format: PhantomData<fn() -> F>,
 }
 
@@ -81,12 +88,21 @@ impl<F: Format, H: Hasher> Ingest<F, H> {
             hasher: H::default(),
             size_bytes: 0,
             head: Vec::new(),
+            failed: false,
+            #[cfg(test)]
+            fail_after: None,
             _format: PhantomData,
         }
     }
 
     pub fn write(&mut self, chunk: &[u8]) -> Result<(), Error> {
-        self.temp.file().write_all(chunk)?;
+        if self.failed {
+            return Err(Error::IngestFailed);
+        }
+        if let Err(error) = self.write_file(chunk) {
+            self.failed = true;
+            return Err(error.into());
+        }
         self.hasher.update(chunk);
         self.size_bytes += chunk.len() as u64;
         if self.head.len() < SNIFF_LEN {
@@ -96,8 +112,20 @@ impl<F: Format, H: Hasher> Ingest<F, H> {
         Ok(())
     }
 
+    fn write_file(&mut self, chunk: &[u8]) -> std::io::Result<()> {
+        #[cfg(test)]
+        if let Some(len) = self.fail_after.take() {
+            self.temp.file().write_all(&chunk[..len.min(chunk.len())])?;
+            return Err(std::io::Error::other("injected write failure"));
+        }
+        self.temp.file().write_all(chunk)
+    }
+
     /// Flush and fsync the file, then derive its hash and format.
     pub fn finish(mut self) -> Result<Staged<F, H>, Error> {
+        if self.failed {
+            return Err(Error::IngestFailed);
+        }
         let file = self.temp.file();
         file.flush()?;
         file.as_file().sync_all()?;
