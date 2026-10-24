@@ -227,7 +227,7 @@ The catalog is held while a `write` closure runs. So inside the closure, an app 
 | P2 | A failed save writes no record. | A failed `land` gives no `Landed`. A failed closure or commit rolls back the transaction. |
 | P3 | The blob record and the app's rows commit atomically. | Both are written in one catalog transaction. |
 | P4 | A file's name always matches its content. | Files enter the tree only by a rename of a temp file that was fully hashed and fsynced. |
-| P5 | A crash never breaks P1. | The file, and every directory above it up to the root, is durable before its record commits. `open` makes the root and any ancestors it creates durable. A crash leaves at most an orphan file. |
+| P5 | A crash never breaks P1. | The file, and every directory above it up to the root, is durable before its record commits. `open` makes the root and its ancestors durable: until an open has succeeded and written `layout.toml`, every open runs fsync on each ancestor of the root, since a failed earlier open may have created some of them. A crash leaves at most an orphan file. |
 | P6 | A file without a record is temporary. | Orphans come only from a crash, a rollback, a dropped `Landed`, or a failed deletion. `sweep` removes them. |
 | P7 | Saves, deletes, and sweeps of the same hash do not race. | All three touch files under the file lock. The in-flight mark covers the time between `land` and the commit. |
 | P8 | A store opened with the wrong settings fails at once. | `layout.toml` records the hasher and `N`, and `open` checks both. |

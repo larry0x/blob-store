@@ -292,26 +292,27 @@ fn check_layout(root: &Path, expected: &str) -> Result<(), Error> {
 /// Create the root, its `tmp/`, and any missing ancestors, and make them
 /// durable: a record must never commit for a file whose directory a crash
 /// could lose.
+///
+/// The layout file is the proof that this was done. `open` writes it only
+/// after this function succeeded. Without it, an earlier open may have
+/// created any of the ancestors and then failed to sync it, and the
+/// directories that exist now do not tell which. So the first successful
+/// open syncs every ancestor, up to the top of the file system.
 fn create_root(root: &Path) -> io::Result<()> {
-    let mut missing = Vec::new();
-    let mut current = root;
-    while !current.try_exists()? {
-        missing.push(current);
-        match parent_of(current) {
-            Some(parent) => current = parent,
-            None => break,
-        }
-    }
+    let first_open = !root.join(LAYOUT_FILE).try_exists()?;
     fs::create_dir_all(root.join(TMP_DIR))?;
-    for created in missing.iter().rev() {
-        if let Some(parent) = parent_of(created) {
-            sync_dir(parent)?;
+    if first_open {
+        let mut current = root;
+        while let Some(parent) = parent_of(current) {
+            match sync_dir(parent) {
+                Ok(()) => {},
+                // This process may not read it, so it did not create it:
+                // it, and every directory above it, existed already.
+                Err(error) if error.kind() == io::ErrorKind::PermissionDenied => break,
+                Err(error) => return Err(error),
+            }
+            current = parent;
         }
-    }
-    // Always, not only when something was created: an earlier open may have
-    // created the root, then failed to sync it.
-    if let Some(parent) = parent_of(root) {
-        sync_dir(parent)?;
     }
     sync_dir(root)
 }
@@ -478,21 +479,40 @@ mod tests {
     }
 
     #[test]
-    fn open_syncs_the_root_again_after_a_failed_open() {
+    fn a_reopen_after_a_failed_open_syncs_every_new_ancestor() {
         let dir = TempDir::new().unwrap();
-        let root = dir.path().join("blobs");
+        let root = dir.path().join("a").join("b").join("blobs");
+
+        // The open creates `a`, `b`, and the root, then the first sync fails.
         sync_hook::fail_next(1);
         assert!(matches!(
             Store::open(&root, Mem::default()),
             Err(Error::Io(_))
         ));
-        assert!(root.is_dir(), "the root was created before the sync failed");
+        assert!(root.is_dir());
 
+        // Everything exists now, but none of it was synced, so the reopen
+        // syncs each directory that the failed open created.
         sync_hook::take();
         let _store = Store::open(&root, Mem::default()).unwrap();
         let synced = sync_hook::take();
-        assert!(synced.contains(&dir.path().to_owned()), "{synced:?}");
-        assert!(synced.contains(&root), "{synced:?}");
+        for expected in [
+            dir.path().to_owned(),
+            dir.path().join("a"),
+            dir.path().join("a").join("b"),
+            root.clone(),
+        ] {
+            assert!(synced.contains(&expected), "{expected:?} not in {synced:?}");
+        }
+    }
+
+    #[test]
+    fn a_later_open_syncs_only_the_root() {
+        let (dir, store) = open();
+        drop(store);
+        sync_hook::take();
+        let store = Store::open(dir.path().join("blobs"), Mem::default()).unwrap();
+        assert_eq!(sync_hook::take(), [store.root().to_owned()]);
     }
 
     #[test]
