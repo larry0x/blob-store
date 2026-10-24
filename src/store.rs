@@ -302,16 +302,16 @@ fn create_root(root: &Path) -> io::Result<()> {
     let first_open = !root.join(LAYOUT_FILE).try_exists()?;
     fs::create_dir_all(root.join(TMP_DIR))?;
     if first_open {
-        let mut current = root;
-        while let Some(parent) = parent_of(current) {
-            match sync_dir(parent) {
+        // Absolute, so that the walk ends at the top of the file system
+        // also for a relative root.
+        for ancestor in std::path::absolute(root)?.ancestors().skip(1) {
+            match sync_dir(ancestor) {
                 Ok(()) => {},
                 // This process may not read it, so it did not create it:
                 // it, and every directory above it, existed already.
                 Err(error) if error.kind() == io::ErrorKind::PermissionDenied => break,
                 Err(error) => return Err(error),
             }
-            current = parent;
         }
     }
     sync_dir(root)
@@ -327,15 +327,6 @@ fn create_shard(root: &Path, dir: &Path) -> io::Result<()> {
         sync_dir(current)?;
     }
     Ok(())
-}
-
-/// The parent directory, with `.` for a bare relative name. `None` at the
-/// top of the file system.
-fn parent_of(path: &Path) -> Option<&Path> {
-    match path.parent()? {
-        parent if parent.as_os_str().is_empty() => Some(Path::new(".")),
-        parent => Some(parent),
-    }
 }
 
 /// Make a directory's entries durable.
@@ -504,6 +495,48 @@ mod tests {
         ] {
             assert!(synced.contains(&expected), "{expected:?} not in {synced:?}");
         }
+    }
+
+    #[test]
+    fn a_first_open_with_a_relative_root_finishes() {
+        let dir = TempDir::new().unwrap();
+        // A relative path from the working directory to the temp dir, so the
+        // test needs no change of the working directory.
+        let cwd = std::env::current_dir().unwrap();
+        let mut root: PathBuf = cwd.ancestors().skip(1).map(|_| "..").collect();
+        root.push(dir.path().strip_prefix("/").unwrap());
+        root.push("blobs");
+        assert!(root.is_relative());
+
+        let (done, finished) = std::sync::mpsc::channel();
+        let opener = {
+            let root = root.clone();
+            thread::spawn(move || {
+                sync_hook::take();
+                let store = Store::open(&root, Mem::default());
+                done.send(()).unwrap();
+                (store.map(drop), sync_hook::take())
+            })
+        };
+        if finished
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .is_err()
+        {
+            eprintln!("hang: the first open of a relative root never finished");
+            std::process::abort();
+        }
+        let (result, synced) = opener.join().unwrap();
+        result.unwrap();
+        assert!(dir.path().join("blobs").join(LAYOUT_FILE).is_file());
+        // Every ancestor of the root, up to the top, once each.
+        let absolute = std::path::absolute(&root).unwrap();
+        for ancestor in absolute.ancestors().skip(1) {
+            assert!(synced.contains(&ancestor.to_owned()), "{ancestor:?}");
+        }
+        assert!(
+            synced.len() < 2 * absolute.ancestors().count(),
+            "{synced:?}"
+        );
     }
 
     #[test]
