@@ -1,0 +1,8 @@
+[package]
+authors     = ["larry0x"]
+description = "Content-addressed file store with a database catalog"
+edition     = "2024"
+license     = "Apache-2.0"
+name        = "blob-store"
+repository  = "https://github.com/larry0x/blob-store"
+version     = "0.1.0"

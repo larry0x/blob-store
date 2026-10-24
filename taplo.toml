@@ -1,0 +1,12 @@
+# https://taplo.tamasfe.dev/configuration/formatter-options.html
+
+[formatting]
+align_comments        = false
+align_entries         = true
+allowed_blank_lines   = 1
+array_auto_expand     = true
+column_width          = 100
+inline_table_expand   = false
+reorder_arrays        = true
+reorder_inline_tables = true
+reorder_keys          = true

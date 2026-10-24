@@ -1,0 +1,59 @@
+name: Nix
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "main"
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - ".github/workflows/nix.yml"
+  pull_request:
+    branches:
+      - "*"
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - ".github/workflows/nix.yml"
+
+permissions:
+  contents: read
+
+# Each step runs the same just recipe a developer runs, so the two cannot
+# drift. `just lint-nix` ends with `nix flake check --all-systems`, which is
+# what checks every output for both systems.
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install nix
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+
+      - name: Report formatting drift
+        run: nix develop --command just fmt-check-nix
+
+  lint-check:
+    name: Lint + Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install nix
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+
+      - name: Check for lint errors
+        run: nix develop --command just lint-nix

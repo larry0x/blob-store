@@ -1,0 +1,14 @@
+# A folder where we dump all sorts of random things that we don't want committed.
+.scratch/
+
+# Editors
+.vscode/
+
+# Rust
+target/
+
+# macOS
+.DS_Store
+
+# Nix build artifact. Note: it's not a folder, but a symlink to a folder.
+result
