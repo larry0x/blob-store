@@ -6,3 +6,36 @@ license     = "Apache-2.0"
 name        = "blob-store"
 repository  = "https://github.com/larry0x/blob-store"
 version     = "0.1.0"
+
+[features]
+# A catalog on redb: the `redb` module and the `Redb` type.
+catalog-redb = ["dep:redb"]
+# A catalog on SQLite: the `sqlite` module and the `Sqlite` type. The app picks
+# the SQLite library, for example with rusqlite's `bundled` feature.
+catalog-sqlite = ["dep:rusqlite"]
+# Nine ready-made formats, `identify`, and the `formats!` macro.
+format-presets = ["dep:infer"]
+# The BLAKE3 hasher, and BLAKE3 as the store's default hasher.
+hasher-blake3 = ["dep:blake3"]
+# The SHA-256 hasher.
+hasher-sha256 = ["dep:sha2"]
+# Serialize and deserialize `Digest` as a hex string.
+serde = ["dep:serde"]
+
+[dependencies]
+blake3    = { default-features = false, features = ["std"], optional = true, version = "1" }
+hex       = { default-features = false, features = ["std"], version = "0.4" }
+infer     = { default-features = false, optional = true, version = "0.22" }
+redb      = { default-features = false, features = ["std"], optional = true, version = "4" }
+rusqlite  = { default-features = false, features = ["cache"], optional = true, version = "0.40" }
+serde     = { default-features = false, features = ["std"], optional = true, version = "1" }
+sha2      = { default-features = false, optional = true, version = "0.11" }
+tempfile  = "3"
+thiserror = "2"
+
+[dev-dependencies]
+# The `catalog-sqlite` feature links whatever SQLite the app picks; the
+# tests bring their own.
+rusqlite   = { default-features = false, features = ["bundled", "cache"], version = "0.40" }
+serde      = { features = ["derive"], version = "1" }
+serde_json = "1"
