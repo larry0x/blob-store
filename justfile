@@ -1,6 +1,13 @@
 # Every tool comes from the nix devShell, so a clean checkout needs only nix.
 dev := "nix develop --command"
 
+# The Nix sources: tracked files plus new ones git does not ignore, minus
+# tracked files deleted from disk but not yet staged. So a new file is
+# covered before its first `git add`, a git-ignored scratch copy is not, and
+# a pending deletion does not hand a tool a path that is gone. A path may not
+# contain a space.
+nix := "$(git ls-files --cached --others --exclude-standard --deduplicate '*.nix' | while IFS= read -r f; do [ -f \"$f\" ] && echo \"$f\"; done)"
+
 # List available recipes
 default:
   @just --list
@@ -59,23 +66,26 @@ test-rust:
 # Format the Nix files
 [group('nix')]
 fmt-nix:
-  {{ dev }} nixfmt $(git ls-files '*.nix')
+  {{ dev }} nixfmt {{ nix }}
 
 # Report Nix formatting drift, changing nothing
 [group('nix')]
 fmt-check-nix:
-  {{ dev }} nixfmt --check $(git ls-files '*.nix')
+  {{ dev }} nixfmt --check {{ nix }}
 
 # The last line is nix itself, not a tool out of the shell, which is why it
 # carries no prefix. Development happens on a Mac, so x86_64-linux is never
 # evaluated there. This evaluates every output for both systems and builds
 # none of them, which is the cheap way to catch a Linux-only mistake.
 
+# statix takes one path per run and does not honor every ignore source, such
+# as .git/info/exclude, so lint-nix loops over the list.
+
 # Lint the Nix files
 [group('nix')]
 lint-nix:
-  {{ dev }} statix check .
-  {{ dev }} deadnix --fail .
+  {{ dev }} sh -c 's=0; for f in "$@"; do statix check "$f" || s=1; done; exit $s' _ {{ nix }}
+  {{ dev }} deadnix --fail {{ nix }}
   nix flake check --all-systems
 
 # ------------------------------------ Bump ------------------------------------
