@@ -52,6 +52,10 @@
               pkgs.nixfmt
               pkgs.statix
               pkgs.deadnix
+
+              # Linter for the Markdown files, configured by
+              # .markdownlint-cli2.yaml.
+              pkgs.markdownlint-cli2
             ];
           };
         }

@@ -69,7 +69,7 @@ pub trait Format: Copy + Eq + Debug + Send + Sync + 'static {
 The `format-presets` feature defines nine common formats. Each one is a unit type that implements `Format` on its own, and the `Preset` trait:
 
 | Preset | Extension | Media type |
-|---|---|---|
+| --- | --- | --- |
 | `Jpeg` | `jpg` | `image/jpeg` |
 | `Png` | `png` | `image/png` |
 | `Gif` | `gif` | `image/gif` |
@@ -222,7 +222,7 @@ The catalog is held while a `write` closure runs. So inside the closure, an app 
 ## Properties
 
 | # | Property | How it holds |
-|---|---|---|
+| --- | --- | --- |
 | P1 | If the catalog has a record, the file exists at `path_of`. | `insert` accepts only a `Landed`. A file is deleted only after its record is gone, under the file lock. |
 | P2 | A failed save writes no record. | A failed `land` gives no `Landed`. A failed closure or commit rolls back the transaction. |
 | P3 | The blob record and the app's rows commit atomically. | Both are written in one catalog transaction. |
@@ -266,7 +266,7 @@ The store must control the commit, to delete a file only after its record is gon
 ## Features
 
 | Feature | Adds |
-|---|---|
+| --- | --- |
 | `format-presets` | The nine preset formats, `identify`, and the `formats!` macro, on `infer`. |
 | `hasher-blake3` | The `Blake3` hasher, and the default type parameter `H = Blake3`. |
 | `hasher-sha256` | The `Sha256` hasher. |

@@ -8,15 +8,24 @@ dev := "nix develop --command"
 # contain a space.
 nix := "$(git ls-files --cached --others --exclude-standard --deduplicate '*.nix' | while IFS= read -r f; do [ -f \"$f\" ] && echo \"$f\"; done)"
 
+# CI runs the same recipes, in .github/workflows/: fmt-check-rust,
+# lint-rust, test-rust, fmt-check-nix, lint-nix, and lint-markdown. `ci` runs
+# them all locally, and the pre-commit hook on the development machine runs
+# `ci` before every commit.
+
 # List available recipes
 default:
   @just --list
 
 # ------------------------------------ All -------------------------------------
 
-# Format every source: Rust, TOML, and Nix
+# Run every check: formatting, linters, and tests
 [group('all')]
-fmt: fmt-rust fmt-nix
+ci: fmt-check lint test
+
+# Format every source: Rust, TOML, Nix, and Markdown
+[group('all')]
+fmt: fmt-rust fmt-nix fmt-markdown
 
 # Report formatting drift in every source, changing nothing
 [group('all')]
@@ -24,7 +33,7 @@ fmt-check: fmt-check-rust fmt-check-nix
 
 # Lint every source
 [group('all')]
-lint: lint-rust lint-nix
+lint: lint-rust lint-nix lint-markdown
 
 # Run every test suite
 [group('all')]
@@ -87,6 +96,21 @@ lint-nix:
   {{ dev }} sh -c 's=0; for f in "$@"; do statix check "$f" || s=1; done; exit $s' _ {{ nix }}
   {{ dev }} deadnix --fail {{ nix }}
   nix flake check --all-systems
+
+# ---------------------------------- Markdown ----------------------------------
+
+# markdownlint-cli2 reads the files to lint, and the rules, from
+# .markdownlint-cli2.yaml. --fix repairs what it can, and reports the rest.
+
+# Fix the Markdown lint errors that can be fixed automatically
+[group('markdown')]
+fmt-markdown:
+  {{ dev }} markdownlint-cli2 --fix
+
+# Lint the Markdown files
+[group('markdown')]
+lint-markdown:
+  {{ dev }} markdownlint-cli2
 
 # ------------------------------------ Bump ------------------------------------
 
