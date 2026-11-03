@@ -53,6 +53,11 @@
               pkgs.statix
               pkgs.deadnix
 
+              # nixf-tidy, the checks of nixd, the Nix language server that VS
+              # Code shows, and jq to print its JSON findings.
+              pkgs.nixf
+              pkgs.jq
+
               # Linter for the Markdown files, configured by
               # .markdownlint-cli2.yaml.
               pkgs.markdownlint-cli2

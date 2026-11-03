@@ -90,11 +90,27 @@ fmt-check-nix:
 # statix takes one path per run and does not honor every ignore source, such
 # as .git/info/exclude, so lint-nix loops over the list.
 
+# The third line runs nixf-tidy: the checks of nixf, the library behind
+# nixd, the language server that VS Code shows, so whatever the editor flags
+# in a Nix file fails here too. --variable-lookup adds the undefined
+# variable check that the editor runs as well. nixf-tidy reports a JSON list
+# on stdout, empty for a clean file, and exits 0 either way, a parse error
+# included, so the line fails on any non-empty list. nixf_report is the jq
+# filter that prints each finding as file:line:column: message (code),
+# filling the {} slots in the message from its args. It is a variable,
+# passed to the shell as an argument, so that its quotes need no escaping
+# inside the shell's own quoted script.
+nixf_report := '.[] | "\($f):\(.range.lCur.line + 1):\(.range.lCur.column + 1): \(reduce .args[] as $a (.message; sub("\\{\\}"; $a))) (\(.sname))"'
+
 # Lint the Nix files
 [group('nix')]
 lint-nix:
   {{ dev }} sh -c 's=0; for f in "$@"; do statix check "$f" || s=1; done; exit $s' _ {{ nix }}
   {{ dev }} deadnix --fail {{ nix }}
+  {{ dev }} sh -c 'q=$1; shift; s=0; for f in "$@"; do \
+    out=$(nixf-tidy --variable-lookup < "$f") || s=1; \
+    [ "$out" = "[]" ] || { s=1; printf "%s\n" "$out" | jq -r --arg f "$f" "$q"; }; \
+  done; exit $s' _ '{{ nixf_report }}' {{ nix }}
   nix flake check --all-systems
 
 # ---------------------------------- Markdown ----------------------------------
