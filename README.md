@@ -1,4 +1,4 @@
-# blob-store
+# blobz
 
 A content-addressed file store with a database catalog, for Rust. It names each file by the hash of its content. It keeps a record of every file in a database, and it keeps the records and the files in sync: if the catalog has a record, the file exists.
 
@@ -12,7 +12,7 @@ let landed = store.land(staged)?;      // renamed into place, fsynced
 store.write(|tx| {
     tx.insert(landed, SystemTime::now())?;
     // The app's own rows go in the same transaction, through tx.inner().
-    Ok::<_, blob_store::Error>(())
+    Ok::<_, blobz::Error>(())
 })?;
 ```
 
@@ -87,7 +87,7 @@ Two signatures can match one file. For example, a PDF header may sit anywhere in
 The `formats!` macro builds an enum out of presets, with any number of them:
 
 ```rust
-blob_store::formats! {
+blobz::formats! {
     #[derive(Serialize, Deserialize)]
     pub enum Media { Jpeg, Png, Webp, Gif, Mp4, Webm, Mov }
 }
