@@ -20,12 +20,12 @@
 /// configuration, write one `formats!` per configuration.
 ///
 /// ```
-/// blob_store::formats! {
+/// blobz::formats! {
 ///     #[derive(PartialOrd, Ord)]
 ///     pub enum Media { Jpeg, Png, Mp4, Mov }
 /// }
 ///
-/// use blob_store::Format;
+/// use blobz::Format;
 /// assert_eq!(Media::Mov.extension(), "mov");
 /// assert_eq!(Media::from_extension("jpg"), Some(Media::Jpeg));
 /// assert_eq!(Media::Jpeg.media_type(), "image/jpeg");
@@ -35,7 +35,7 @@
 /// A `cfg_attr` that adds other attributes is fine:
 ///
 /// ```
-/// blob_store::formats! {
+/// blobz::formats! {
 ///     #[cfg_attr(all(), derive(PartialOrd, Ord))]
 ///     pub enum Media {
 ///         /// Not a cfg(...) attribute, only text that mentions one.
@@ -49,20 +49,20 @@
 /// Each of these stops the build, even though the condition is true:
 ///
 /// ```compile_fail
-/// blob_store::formats! {
+/// blobz::formats! {
 ///     pub enum Media { Jpeg, #[cfg(all())] Png }
 /// }
 /// ```
 ///
 /// ```compile_fail
-/// blob_store::formats! {
+/// blobz::formats! {
 ///     #[cfg(all())]
 ///     pub enum Media { Jpeg, Png }
 /// }
 /// ```
 ///
 /// ```compile_fail
-/// blob_store::formats! {
+/// blobz::formats! {
 ///     pub enum Media { Jpeg, #[cfg_attr(all(), cfg(all()))] Png }
 /// }
 /// ```
