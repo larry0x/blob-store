@@ -16,3 +16,7 @@ config:
 
   # A paragraph is one line, however long it runs.
   line-length: false
+
+  # Padding a table's columns to align its pipes makes a wide table harder
+  # to read, not easier, and the rule has no width threshold to limit it.
+  table-column-style: false
