@@ -1,0 +1,45 @@
+# The jobs live in the tools repository, as a reusable workflow; this file
+# holds the triggers. `just sync-tools` writes the commit below to match the
+# version of the tools input that flake.lock pins, and `nix flake check` fails
+# when the two differ.
+
+name: TOML
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# The workflow runs when a file of its language changes, or a file that
+# changes what the recipes do: the flake, which pins the tools; the justfile;
+# and .gitignore, which decides the files the recipes see.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "main"
+    paths:
+      - "**.toml"
+      - ".github/workflows/toml.yml"
+      - "flake.nix"
+      - "flake.lock"
+      - "justfile"
+      - "base.just"
+      - ".gitignore"
+  pull_request:
+    branches:
+      - "*"
+    paths:
+      - "**.toml"
+      - ".github/workflows/toml.yml"
+      - "flake.nix"
+      - "flake.lock"
+      - "justfile"
+      - "base.just"
+      - ".gitignore"
+
+permissions:
+  contents: read
+
+jobs:
+  toml:
+    uses: larry0x/tools/.github/workflows/toml.yml@efa7fa8784511b7c2c6944f19815c95e6c392e65

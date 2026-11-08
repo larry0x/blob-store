@@ -18,7 +18,28 @@
     },
     "root": {
       "inputs": {
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "tools": "tools"
+      }
+    },
+    "tools": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1794125159,
+        "narHash": "sha256-7UYyfl61rqs0JL6gk5rmqm+p9NWGLokMGcKm2JlUXFE=",
+        "owner": "larry0x",
+        "repo": "tools",
+        "rev": "efa7fa8784511b7c2c6944f19815c95e6c392e65",
+        "type": "github"
+      },
+      "original": {
+        "owner": "larry0x",
+        "repo": "tools",
+        "type": "github"
       }
     }
   },
