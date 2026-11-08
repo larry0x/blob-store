@@ -1,0 +1,24 @@
+# yamllint's configuration, read by `just lint-yaml`.
+
+extends: default
+
+# Every YAML file git tracks or would track.
+ignore-from-file: .gitignore
+
+rules:
+  # A comment is one line, however long it runs, like a Markdown paragraph.
+  line-length: disable
+
+  # A file holds one document, so the `---` marker adds nothing.
+  document-start: disable
+
+  # GitHub Actions names its trigger key `on`, which YAML 1.1 reads as a
+  # boolean. Checking values, and not keys, keeps the rule for everything
+  # else.
+  truthy:
+    check-keys: false
+
+  # yamlfmt writes one space before a comment; yamllint's default asks for
+  # two.
+  comments:
+    min-spaces-from-content: 1

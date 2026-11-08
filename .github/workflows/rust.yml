@@ -1,9 +1,15 @@
+# The jobs live in the tools repository, as a reusable workflow; this file
+# holds the triggers. `just sync-tools` writes the commit below to match the
+# version of the tools input that flake.lock pins, and `nix flake check` fails
+# when the two differ.
+
 name: Rust
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# The workflow runs on every change, with no paths filter.
 on:
   workflow_dispatch:
   push:
@@ -16,38 +22,6 @@ on:
 permissions:
   contents: read
 
-# Each step runs the same just recipe a developer runs, so the two cannot
-# drift. RUST_BACKTRACE is set by the recipe, not here, for the same reason.
 jobs:
-  fmt:
-    name: Format
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install nix
-        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
-
-      - name: Report formatting drift
-        run: nix develop --command just fmt-check-rust
-
-  lint-test:
-    name: Lint + Test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install nix
-        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
-
-      - name: Check for lint errors
-        run: nix develop --command just lint-rust
-
-      - name: Run the tests
-        run: nix develop --command just test-rust
+  rust:
+    uses: larry0x/tools/.github/workflows/rust.yml@efa7fa8784511b7c2c6944f19815c95e6c392e65

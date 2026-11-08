@@ -1,0 +1,16 @@
+# yamlfmt's configuration, read by `just fmt-yaml` and `just fmt-check-yaml`.
+
+# Every YAML file git tracks or would track.
+doublestar: true
+gitignore_excludes: true
+include:
+  - "**/*.yaml"
+  - "**/*.yml"
+
+formatter:
+  type: basic
+  # Keep the blank lines that separate groups of keys.
+  retain_line_breaks_single: true
+  # Without this, yamlfmt removes the document start marker `---` where one
+  # is written, and adds nothing where none is.
+  include_document_start: false

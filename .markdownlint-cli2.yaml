@@ -1,8 +1,9 @@
-# markdownlint-cli2's configuration, read by `just lint-markdown` and
-# `just fmt-markdown`. YAML rather than JSON so it can carry its reasons.
+# markdownlint-cli2's configuration, read by `just lint-markdown`, by
+# `just fmt-markdown`, and by the editor extension. YAML rather than JSON so
+# it can carry its reasons.
 
-# Every Markdown file git tracks or would track: .gitignore keeps the build
-# output out.
+# Every Markdown file git tracks or would track: .gitignore keeps the scratch
+# folder, dependencies, and build output out.
 globs:
   - "**/*.md"
 gitignore: true

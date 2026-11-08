@@ -1,14 +1,51 @@
+# One file for every repository. It covers every language any of them uses;
+# a pattern for a language a repository does not use matches nothing there.
+# A file git already tracks stays tracked even when a pattern here matches it.
+
 # A folder where we dump all sorts of random things that we don't want committed.
 .scratch/
 
 # Editors
 .vscode/
 
-# Rust
-target/
-
 # macOS
 .DS_Store
 
-# Nix build artifact. Note: it's not a folder, but a symlink to a folder.
-result
+# direnv's cache of the dev shell
+.direnv/
+
+# Nix build output. `nix build` writes a symlink, not a folder, so these
+# patterns carry no trailing slash, which would match folders only. A package
+# with several outputs writes one result-<output> link per extra output.
+/result
+/result-*
+
+# Rust build output, and mdBook's when its build-dir is target
+target/
+
+# JavaScript and TypeScript: dependencies and bundler output
+node_modules/
+dist/
+
+# Cloudflare's wrangler CLI
+.wrangler/
+
+# Lean: Lake's build output and fetched dependencies
+.lake/
+
+# LaTeX: latexmk's output folder (set in .latexmkrc), and latexindent's
+# backups and log
+/build/
+*.bak[0-9]*
+indent.log
+
+# Python
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+
+# Temporary backups during development work
+/.backups/
+
+# Logs of recipe runs
+/.logs/
